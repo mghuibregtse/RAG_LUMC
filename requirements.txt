@@ -24,7 +24,7 @@ google-generativeai==0.8.4
 anthropic==0.45.2
 # torch: the version below is the CPU version.
 # For NVIDIA GPU support, install the CUDA-enabled version per instructions at https://pytorch.org/get-started/locally/
-torch==2.5.1
+torch==2.7.0
 
 # Visualization libraries
 plotly==6.0.0
