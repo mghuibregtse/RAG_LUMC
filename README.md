@@ -88,7 +88,7 @@ Only keys for the models you actually use are required. If you're calling multip
 | ----------------------- | --------------------------------------------- |
 | `HUGGINGFACE_API_TOKEN` | **Required** for loading HF models/embeddings |
 | `OPENAI_API_KEY`        | Optional: for OpenAI models (GPT-4, GPT-3.5)  |
-| `GROK_API_KEY`          | Optional: for Grok endpoints                  |
+| `XAI_API_KEY`          | Optional: for XAI endpoints                  |
 | `ANTHROPIC_API_KEY`     | Optional: for Anthropic Claude                |
 | `GEMINI_API_KEY`        | Optional: for Gemini API access               |
 
@@ -98,7 +98,7 @@ Store them in a `.env` file at the repo root:
 HUGGINGFACE_API_TOKEN=your_token
 # only if used:
 # OPENAI_API_KEY=...
-# GROK_API_KEY=...
+# XAI_API_KEY=...
 # ANTHROPIC_API_KEY=...
 # GEMINI_API_KEY=...
 ```
