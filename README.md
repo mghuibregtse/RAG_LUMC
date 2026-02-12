@@ -151,6 +151,38 @@ Alternatively, invoke individual steps:
 
 ---
 
+## Steps When Running the Pipeline on a New Dataset
+
+1. **Update configuration** in `configs_system_instruction/GSEA.json`:
+     - Update [`query`](configs_system_instruction/GSEA.json#L2)
+     - Change [`embeddings_model_name`](configs_system_instruction/GSEA.json#L5) based on organism type
+     - Change [`max_genes`](configs_system_instruction/GSEA.json#L11) and [`fdr_threshold`](configs_system_instruction/GSEA.json#L12) 
+
+2. **Update literature corpus** in `data/PDF/`
+     - Replace or add relevant PDF files
+
+3. **Add genes of interest** in `data/GSEA/genes_of_interest/`
+     - Add Excel file containing the list of DE Genes
+
+4. **Update pathway and Biomart resources** in `data/GSEA/to_be_converted/`
+     - Replace WikiPathways files 
+     - Add new Biomart file: `[species]_data.txt.gz`
+
+5. **Generate JSON gene resources** in `data/GSEA/JSON/`
+     - Add converted Biomart JSON files  
+       *(download from https://useast.ensembl.org/info/data/biomart/index.html and run `convert_biomart_to_json.py` first)*
+       
+6. **Update gene synonym processing** in `supporting scripts/gene_synonym.ipynb` 
+     - Update raw Biomart [`file`](supporting%20scripts/gene_synonym.ipynb#L57) : `[species]_data.txt.gz` 
+     - Update path of wikipathway file [`input_file`](supporting%20scripts/gene_synonym.ipynb#L129)  
+     - Update path of wikipathway file [`output_file`](supporting%20scripts/gene_synonym.ipynb#L130)  
+     - Update [`input_file`](supporting%20scripts/gene_synonym.ipynb#L170):  
+       `reordered_[species]_data.txt.gz` & [`output_file`](supporting%20scripts/gene_synonym.ipynb#L172): `[species]_genes_consolidated.txt.gz`
+     - Update [`input_gmt_path`](supporting%20scripts/gene_synonym.ipynb#L269) & [`output_gmt_path`](supporting%20scripts/gene_synonym.ipynb#L270) (`wikipathways_synonyms_[species].gmt.gz`) 
+     - Update [`max_genes`](supporting%20scripts/gene_synonym.ipynb#L419)
+     - Update [`gene_data_file`](supporting%20scripts/gene_synonym.ipynb#L454)
+     - Update [`excel_file_path`](supporting%20scripts/gene_synonym.ipynb#L515) 
+       
 ## Fine-Tuning the Model
 
 To adapt the LLM to domain specifics, use the **fine\_tune.ipynb** notebook:
