@@ -175,15 +175,9 @@ Alternatively, invoke individual steps:
        *(download from https://useast.ensembl.org/info/data/biomart/index.html and run `convert_biomart_to_json.py` first)*
        
 6. **Update gene synonym processing** in `supporting scripts/gene_synonym.ipynb` 
-     - Update raw Biomart [`file`](supporting%20scripts/gene_synonym.ipynb#L57) : `[species]_data.txt.gz` 
-     - Update path of wikipathway file [`input_file`](supporting%20scripts/gene_synonym.ipynb#L129)  
-     - Update path of wikipathway file [`output_file`](supporting%20scripts/gene_synonym.ipynb#L130)  
-     - Update [`input_file`](supporting%20scripts/gene_synonym.ipynb#L170):  
-       `reordered_[species]_data.txt.gz` & [`output_file`](supporting%20scripts/gene_synonym.ipynb#L172): `[species]_genes_consolidated.txt.gz`
-     - Update [`input_gmt_path`](supporting%20scripts/gene_synonym.ipynb#L269) & [`output_gmt_path`](supporting%20scripts/gene_synonym.ipynb#L270) (`wikipathways_synonyms_[species].gmt.gz`) 
-     - Update [`max_genes`](supporting%20scripts/gene_synonym.ipynb#L419)
-     - Update [`gene_data_file`](supporting%20scripts/gene_synonym.ipynb#L454)
-     - Update [`excel_file_path`](supporting%20scripts/gene_synonym.ipynb#L515) 
+     - Update [`SPECIES`] 
+     - Update [`SPECIES_SHORT`]  
+     - Update [`WIKIPATHWAYS_DATE`]
        
 ## Fine-Tuning the Model
 
