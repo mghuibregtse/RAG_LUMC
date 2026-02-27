@@ -167,6 +167,8 @@ Alternatively, invoke individual steps:
 4. **Update pathway and Biomart resources** in `data/GSEA/to_be_converted/`
      - Replace WikiPathways files 
      - Add new Biomart file: `[species]_data.txt.gz`
+       Acquire the biomart file from https://www.ensembl.org/biomart/martview and select for export: Gene stable ID, Gene name, Gene description, Gene Synonym, NCBI gene ID and NCBI gene description
+
 
 5. **Generate JSON gene resources** in `data/GSEA/JSON/`
      - Add converted Biomart JSON files  
