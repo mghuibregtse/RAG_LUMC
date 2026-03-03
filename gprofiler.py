@@ -1,7 +1,12 @@
 import os
 import pandas as pd
 import requests
-from RAG_workflow import initialize_gene_list, load_config
+from RAG_workflow import (
+    initialize_gene_list,
+    load_config,
+    load_gene_list_from_descriptions,
+    resolve_gene_excel_path,
+)
 import argparse
 from typing import Any, Dict, List, Optional, Tuple, Set
 
@@ -150,8 +155,21 @@ if __name__ == "__main__":
     max_genes_value = ""
     for i in max_genes:
         max_genes_value = i
-    gene_list_string, regulation, num_genes = initialize_gene_list(max_genes=max_genes_value,
-                                                                   fdr_threshold=fdr_threshold)
+
+    gene_list_string, num_genes = load_gene_list_from_descriptions()
+    regulation = "combined"
+    if num_genes > 0:
+        print(
+            f"Using {num_genes} genes from "
+            "./data/GSEA/external_gene_data/gene_descriptions.csv"
+        )
+    else:
+        excel_path = resolve_gene_excel_path()
+        gene_list_string, regulation, num_genes = initialize_gene_list(
+            max_genes=max_genes_value,
+            fdr_threshold=fdr_threshold,
+            excel_file_path=excel_path,
+        )
     print(f"Number of genes: {num_genes}")
 
     genes = [gene.strip() for gene_list in gene_list_string.split(',')
