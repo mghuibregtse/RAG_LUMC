@@ -161,5 +161,8 @@ cython_debug/
 
 # Ignore specific database and index files
 /database/
+/data/
+/output/
 /output/model/biolinkbert-large-simcse-rat
 /output/hard_fine_tune_model/best_model
+archive_old_run/
