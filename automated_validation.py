@@ -3,6 +3,7 @@ import glob
 import re
 import time
 import sys
+import csv
 from pathlib import Path
 import json
 import argparse
@@ -214,9 +215,28 @@ def main():
     globals()['config_name'] = config_name
     globals().update(config)
 
-    input_gene_dir = Path("output/all_genes")
-    create_input_dir(input_gene_dir)
-    input_set = load_input_gene_set(size, input_gene_dir)
+    gene_descriptions_path = Path("data/GSEA/external_gene_data/gene_descriptions.csv")
+    input_set = set()
+
+    if gene_descriptions_path.exists():
+        with gene_descriptions_path.open("r", encoding="utf8", newline="") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                gene_name = (row.get("Gene name") or "").strip()
+                if gene_name:
+                    input_set.add(normalize_gene(gene_name))
+
+        size = len(input_set)
+        print(f"Using {size} input genes from {gene_descriptions_path}")
+    else:
+        input_gene_dir = Path("output/all_genes")
+        configured_sizes = {int(g) for g in config.get("max_genes", [])}
+        create_input_dir(input_gene_dir, configured_sizes if configured_sizes else None)
+        input_set = load_input_gene_set(size, input_gene_dir)
+        print(
+            "gene_descriptions.csv not found; "
+            f"falling back to config-based input size ({size})"
+        )
 
     with open(ground_truth_file, 'r', encoding="utf8") as file:
         ground_truth = file.read().strip()
