@@ -160,10 +160,14 @@ Follow the steps below when applying a new dataset to the pipeline.
    Update the following fields:
      - [`query`](configs_system_instruction/GSEA.json#L2)
      - [`embeddings_model_name`](configs_system_instruction/GSEA.json#L5) *(optional: only if the current embedding model performs poorly)*  
-       - The embedding can be tested by running:  
-    `embedding_retrieval_test.py`
-     - [`max_genes`](configs_system_instruction/GSEA.json#L11) *(optional)*
-     - [`fdr_threshold`](configs_system_instruction/GSEA.json#L12) *(optional)* 
+       - The embedding can be tested by running:
+
+       ```bash
+       python embedding_retrieval_test.py --gmt-path "<path_to_gmt_file>" --pathway "<selected_pathway_name_for_testing>"
+       ```
+
+   - [`max_genes`](configs_system_instruction/GSEA.json#L11) *(optional)*
+   - [`fdr_threshold`](configs_system_instruction/GSEA.json#L12) *(optional)*
 
 3. **Update literature folder** in `data/PDF/`
      - Add or replace relevant academic literature (PDF files).
@@ -194,7 +198,7 @@ Follow the steps below when applying a new dataset to the pipeline.
        - Gene synonym  
        - NCBI gene ID  
        - NCBI gene description
-       - Example:  
+   - Example:  
       `mice_data.txt.gz`
 
 6. **Generate JSON gene resources** in `data/GSEA/JSON/`
