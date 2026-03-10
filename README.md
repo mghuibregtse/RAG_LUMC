@@ -151,6 +151,84 @@ Alternatively, invoke individual steps:
 
 ---
 
+## Running the Pipeline on a New Dataset
+
+Follow the steps below when applying a new dataset to the pipeline.
+
+1. **Update configuration** in `configs_system_instruction/GSEA.json`:
+
+   Update the following fields:
+     - [`query`](configs_system_instruction/GSEA.json#L2)
+     - [`embeddings_model_name`](configs_system_instruction/GSEA.json#L5) *(optional: only if the current embedding model performs poorly)*  
+       - The embedding can be tested by running:
+
+       ```bash
+       python embedding_retrieval_test.py --gmt-path "<path_to_gmt_file>" --pathway "<selected_pathway_name_for_testing>"
+       ```
+
+   - [`max_genes`](configs_system_instruction/GSEA.json#L11) *(optional)*
+   - [`fdr_threshold`](configs_system_instruction/GSEA.json#L12) *(optional)*
+
+3. **Update literature folder** in `data/PDF/`
+     - Add or replace relevant academic literature (PDF files).
+     - Ensure the literature provides biological background information relevant to the dataset.
+
+4. **Add genes of interest** in `data/GSEA/genes_of_interest/`
+     - Add a simple `.txt` file containing the differentially expressed (DE) gene names.
+     - Example: `Mice_CMT1A.txt`
+
+5. **Update Wikipathway and Biomart resources** in `data/GSEA/to_be_converted/`
+
+   **WikiPathways file**
+
+     - Download the correct organism file from:  
+      https://data.wikipathways.org/current/gmt/
+     - Replace the existing GMT file.
+     - Example:  
+      `wikipathways-20260210-gmt-Mus_musculus.gmt`
+    
+    **Biomart File**
+    
+    - Download the correct organism file from:  
+      https://www.ensembl.org/biomart/martview  
+    - Select the following fields for export:
+       - Gene stable ID  
+       - Gene name  
+       - Gene description  
+       - Gene synonym  
+       - NCBI gene ID  
+       - NCBI gene description
+   - Example:  
+      `mice_data.txt.gz`
+
+6. **Generate JSON gene resources** in `data/GSEA/JSON/`
+
+   Regenerate the following files:
+
+      - `genes.json`
+      - `ncbi_id_to_symbol.json`
+
+    How:
+
+      - Open `convert_biomart_to_json.py`
+      - Update the path to the unzipped Biomart file
+      - Run the script
+      - Move the generated JSON files into `data/GSEA/JSON/`
+       
+7. **Update gene synonym processing** in `supporting scripts/gene_synonym.ipynb`
+
+   Update the following fields:
+     - [`SPECIES`] 
+     - [`SPECIES_SHORT`]  
+     - [`WIKIPATHWAYS_DATE`]
+  
+8. **Run all cells of `supporting scripts/gene_synonym.ipynb`** to (re)create the nessecary intermediate files
+9. **Run the rest of the pipeline**:
+
+  ```bash
+  python run_all_files.py --GSEA
+  ```
+       
 ## Fine-Tuning the Model
 
 To adapt the LLM to domain specifics, use the **fine\_tune.ipynb** notebook:

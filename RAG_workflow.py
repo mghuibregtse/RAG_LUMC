@@ -185,7 +185,7 @@ def compute_file_hash(file_path: str, block_size: int = 65536) -> str:
 def initialize_gene_list(
         max_genes: int,
         fdr_threshold: float,
-        excel_file_path: str = r"data/GSEA/genes_of_interest/PMP22_VS_WT.xlsx",
+    excel_file_path: Optional[str] = None,
         de_filter_option: str = "combined"
 ) -> Tuple[str, str, int]:
     """
@@ -194,8 +194,9 @@ def initialize_gene_list(
     Args:
         max_genes: An integer specifying the maximum number of genes to process.
         fdr_threshold: The threshold for the false discovery rate (FDR).
-        excel_file_path: The path to the Excel file containing gene data
-            (default: "data/GSEA/genes_of_interest/PMP22_VS_WT.xlsx").
+        excel_file_path: The path to the Excel file containing gene data.
+            If not provided or missing, an available .xlsx file in
+            ./data/GSEA/genes_of_interest is used when present.
         de_filter_option: Specifies whether to combine or separate up‐ and down‐regulated genes
             (default: "combined").
 
@@ -206,7 +207,8 @@ def initialize_gene_list(
               ('upregulated', 'downregulated', or 'combined').
             - num_genes: The number of genes included in the final list.
     """
-    results = process_excel_data(excel_file_path, de_filter_option, max_genes, fdr_threshold)
+    resolved_excel_path = resolve_gene_excel_path(excel_file_path)
+    results = process_excel_data(resolved_excel_path, de_filter_option, max_genes, fdr_threshold)
     if results:
         gene_list_string, regulation, num_genes = results[0]
     else:
@@ -214,6 +216,39 @@ def initialize_gene_list(
         regulation = ""
         num_genes = 0
     return gene_list_string, regulation, num_genes
+
+
+def resolve_gene_excel_path(
+        preferred_path: Optional[str] = None,
+        genes_dir: str = r"./data/GSEA/genes_of_interest"
+) -> str:
+    """
+    Resolve the Excel file path used for gene initialization.
+
+    Priority:
+      1) user-provided preferred_path if it exists,
+      2) first .xlsx file found in genes_dir (sorted),
+      3) legacy default path.
+    """
+    legacy_default = r"data/GSEA/genes_of_interest/PMP22_VS_WT.xlsx"
+    requested = preferred_path or legacy_default
+
+    if os.path.exists(requested):
+        return requested
+
+    if os.path.isdir(genes_dir):
+        excel_files = sorted(
+            [f for f in os.listdir(genes_dir) if f.lower().endswith(".xlsx")]
+        )
+        if excel_files:
+            fallback_path = os.path.join(genes_dir, excel_files[0])
+            print(
+                f"⚠ Requested Excel file not found: {requested}. "
+                f"Using fallback: {fallback_path}"
+            )
+            return fallback_path
+
+    return requested
 
 
 def process_excel_data(
@@ -262,6 +297,32 @@ def process_excel_data(
         raise ValueError(f"Unknown mode {mode!r}; expected 'combined' or 'separate'")
 
     return out
+
+
+def load_gene_list_from_descriptions(
+        csv_path: str = r"./data/GSEA/external_gene_data/gene_descriptions.csv"
+) -> Tuple[str, int]:
+    """
+    Load gene names from gene_descriptions.csv and return a comma-separated list plus count.
+
+    Args:
+        csv_path: Path to gene_descriptions.csv containing at least a 'Gene name' column.
+
+    Returns:
+        Tuple of (gene_list_string, num_genes).
+    """
+    if not os.path.exists(csv_path):
+        return "", 0
+
+    try:
+        df = pd.read_csv(csv_path, usecols=["Gene name"])
+    except Exception as e:
+        logging.warning("Failed to load genes from %s: %s", csv_path, e)
+        return "", 0
+
+    genes = [g.strip() for g in df["Gene name"].dropna().astype(str).tolist() if g.strip()]
+    genes = list(dict.fromkeys(genes))
+    return ", ".join(genes), len(genes)
 
 
 def load_gene_id_cache(file_path: str) -> Dict[str, str]:
@@ -1565,12 +1626,24 @@ def query_llm(
                 answer = data["choices"][0]["message"]["content"]
 
             elif model_dir == "OpenAI":
-                response = client_open_ai.chat.completions.create(  # type: ignore
-                    model=generation_model,
-                    messages=messages,
-                    temperature=kwargs.get("temperature", 0),
-                    **kwargs
-                )
+                # Some models (e.g., gpt-5-mini) don't support temperature=0
+                # Use default if the model requires it
+                temp = kwargs.get("temperature", 0)
+                if generation_model.startswith("gpt-5"):
+                    # gpt-5-mini only supports default temperature (1)
+                    kwargs_copy = {k: v for k, v in kwargs.items() if k != "temperature"}
+                    response = client_open_ai.chat.completions.create(  # type: ignore
+                        model=generation_model,
+                        messages=messages,
+                        **kwargs_copy
+                    )
+                else:
+                    response = client_open_ai.chat.completions.create(  # type: ignore
+                        model=generation_model,
+                        messages=messages,
+                        temperature=temp,
+                        **kwargs
+                    )
                 answer = response.choices[0].message.content
 
             elif model_dir.startswith("OpenAI o"):
@@ -1610,13 +1683,22 @@ def query_llm(
                 )
                 answer = response.choices[0].message.content
             else:
-                # Fallback to OpenAI
-                response = client_open_ai.chat.completions.create(  # type: ignore
-                    model=generation_model,
-                    messages=messages,
-                    temperature=0,
-                    **kwargs
-                )
+                # Fallback to OpenAI (for unknown model_dir)
+                # Some models (e.g., gpt-5-mini) don't support temperature=0
+                if generation_model.startswith("gpt-5"):
+                    kwargs_copy = {k: v for k, v in kwargs.items() if k != "temperature"}
+                    response = client_open_ai.chat.completions.create(  # type: ignore
+                        model=generation_model,
+                        messages=messages,
+                        **kwargs_copy
+                    )
+                else:
+                    response = client_open_ai.chat.completions.create(  # type: ignore
+                        model=generation_model,
+                        messages=messages,
+                        temperature=0,
+                        **kwargs
+                    )
                 answer = response.choices[0].message.content
 
             duration = round(time.perf_counter() - start_time, 2)
@@ -2059,28 +2141,41 @@ def main() -> None:
             print(f"✗ {dir_path}: DIRECTORY NOT FOUND")
 
     # Check for the Excel file specifically
-    excel_path = "./data/GSEA/genes_of_interest/PMP22_VS_WT.xlsx"
+    excel_path = resolve_gene_excel_path()
     if os.path.exists(excel_path):
         print(f"✓ Excel file found: {excel_path}")
     else:
         print(f"✗ Excel file NOT FOUND: {excel_path}")
     print("=" * 40 + "\n")
 
-    total_runs = len(max_genes) * query_range
+    precomputed_gene_list_string, precomputed_gene_count = load_gene_list_from_descriptions()
+    gene_counts_to_run = list(max_genes)
+    if precomputed_gene_count > 0:
+        gene_counts_to_run = [precomputed_gene_count]
+        print(
+            f"Using {precomputed_gene_count} genes from "
+            "./data/GSEA/external_gene_data/gene_descriptions.csv"
+        )
+
+    total_runs = len(gene_counts_to_run) * query_range
     pbar = tqdm(total=total_runs, desc="Starting GSEA runs")
 
-    for gene_count in max_genes:
+    for gene_count in gene_counts_to_run:
         for iteration in range(1, query_range + 1):
             # update description
             pbar.set_description(f"GSEA for {gene_count} genes, iteration {iteration}/{query_range}")
 
             current_max_genes = gene_count
-            gene_list_string, regulation, num_genes = initialize_gene_list(
-                max_genes=current_max_genes,
-                fdr_threshold=fdr_threshold,
-                excel_file_path=r"./data/GSEA/genes_of_interest/PMP22_VS_WT.xlsx",
-                de_filter_option="combined",
-            )
+            if precomputed_gene_count > 0:
+                gene_list_string = precomputed_gene_list_string
+                regulation = "combined"
+                num_genes = precomputed_gene_count
+            else:
+                gene_list_string, regulation, num_genes = initialize_gene_list(
+                    max_genes=current_max_genes,
+                    fdr_threshold=fdr_threshold,
+                    de_filter_option="combined",
+                )
 
             print(f"DEBUG: Gene list created with {num_genes} genes")
             if num_genes > 0:
@@ -2160,11 +2255,11 @@ def main() -> None:
                 bm25_index, bm25_chunk_ids,
                 weight_faiss, weight_bm25,
                 system_instruction_response,
-                gene_count
+                num_genes
             )
 
             pbar.update()
-            print(f"Completed iteration {iteration} for {gene_count} genes\n")
+            print(f"Completed iteration {iteration} for {num_genes} genes\n")
 
     pbar.close()
     print("\n=== All runs completed ===")
