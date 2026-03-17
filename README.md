@@ -283,6 +283,7 @@ To adapt the LLM to domain specifics, use the **fine\_tune.ipynb** notebook:
 * **API errors:** Check that your `.env` keys match the services you’re calling.
 * **Memory errors:** Lower `batch_size` in your config.
 * **Index load failures:** Verify `faiss_index.bin` exists and matches embedding dims.
+* **Fresh run cleanup:** Use `python cleanup_run_state.py --scope index` to clear the retrieval cache (`reference_chunks.db`, `faiss_index.bin`, `file_log.json`) before a clean rebuild. Add `--scope all` to also clear generated outputs, and `--dry-run` to preview the cleanup first.
 
 
 ---
