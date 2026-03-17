@@ -8,9 +8,10 @@
 4. [Configuration](#configuration)
 5. [Input and Output](#input-and-output)
 6. [Running the Pipeline](#running-the-pipeline)
-7. [Fine-Tuning the Model](#fine-tuning-the-model)
-8. [Troubleshooting](#troubleshooting)
-9. [Contact](#contact)
+7. [Running the Pipeline on a New Dataset](#running-the-pipeline-on-a-new-dataset)
+8. [Fine-Tuning the Model](#fine-tuning-the-model)
+9. [Troubleshooting](#troubleshooting)
+10. [Contact](#contact)
 
 ---
 
@@ -155,31 +156,20 @@ Alternatively, invoke individual steps:
 
 ## Running the Pipeline on a New Dataset
 
-Follow the steps below when applying a new dataset to the pipeline.
+As seen in this repository, the current workflow is already configured on a rat-specific dataset. But when applying a new dataset to the pipeline, follow the steps below:
 
-1. **Update configuration** in `configs_system_instruction/GSEA.json`:
+### Intermediate file generation
 
-   Update the following fields:
-     - [`query`](configs_system_instruction/GSEA.json#L2)
-     - [`embeddings_model_name`](configs_system_instruction/GSEA.json#L5) *(optional: only if the current embedding model performs poorly)*  
-       - The embedding can be tested by running:
+First certain intermediate files have to be created based on the species worked with. These are created by `gene_synonym.ipynb`. Before running this script, perform the following steps:
 
-       ```bash
-       python embedding_retrieval_test.py --gmt-path "<path_to_gmt_file>" --pathway "<selected_pathway_name_for_testing>"
-       ```
-
-   - [`max_genes`](configs_system_instruction/GSEA.json#L11) *(optional)*
-   - [`fdr_threshold`](configs_system_instruction/GSEA.json#L12) *(optional)*
-
-3. **Update literature folder** in `data/PDF/`
-     - Add or replace relevant academic literature (PDF files).
-     - Ensure the literature provides biological background information relevant to the dataset.
-
-4. **Add genes of interest** in `data/GSEA/genes_of_interest/`
+1. **Add genes of interest** in `data/GSEA/genes_of_interest/`
      - Add a simple `.txt` file containing the differentially expressed (DE) gene names.
      - Example: `Mice_CMT1A.txt`
 
-5. **Update Wikipathway and Biomart resources** in `data/GSEA/to_be_converted/`
+2. **Update Wikipathway and Biomart resources** in `data/GSEA/to_be_converted/`
+
+   The Wikipathway GMT file contains biological pathways and their associated genes for a specific organism. This file is used by the pipeline to perform a basic pathway overrepresentation analysis (e.g., ORA).
+   The gene annotation file from BioMart containis gene identifiers, symbols, descriptions, and synonyms. This is used for gene ID mapping and annotation.
 
    **WikiPathways file**
 
@@ -194,18 +184,18 @@ Follow the steps below when applying a new dataset to the pipeline.
     - Download the correct organism file from:  
       https://www.ensembl.org/biomart/martview  
     - Select the following fields for export:
-       - Gene stable ID  
-       - Gene name  
-       - Gene description  
-       - Gene synonym  
-       - NCBI gene ID  
-       - NCBI gene description
+       - *Gene stable ID*  
+      - *Gene name*  
+      - *Gene description*  
+      - *Gene synonym*  
+      - *NCBI gene ID*  
+      - *NCBI gene description*
    - Example:  
       `mice_data.txt.gz`
 
-6. **Generate JSON gene resources** in `data/GSEA/JSON/`
+4. **Generate JSON gene resources** in `data/GSEA/JSON/`
 
-   Regenerate the following files:
+   These JSON files store gene annotation and identifier mapping information derived from the Biomart export and are used by the pipeline to standardize and retrieve gene-related data. Regenerate the following files:
 
       - `genes.json`
       - `ncbi_id_to_symbol.json`
@@ -213,18 +203,60 @@ Follow the steps below when applying a new dataset to the pipeline.
     How:
 
       - Open `convert_biomart_to_json.py`
-      - Update the path to the unzipped Biomart file
-      - Run the script
-      - Move the generated JSON files into `data/GSEA/JSON/`
+      - Update the path to the unzipped Biomart file (see step 2)
+      - Run the script:
+   
+        ```bash
+          python convert_biomart_to_json.py
+        ```
+   
        
-7. **Update gene synonym processing** in `supporting scripts/gene_synonym.ipynb`
+6. **Update gene synonym processing** in `supporting scripts/gene_synonym.ipynb`
 
    Update the following fields:
-     - [`SPECIES`] 
-     - [`SPECIES_SHORT`]  
-     - [`WIKIPATHWAYS_DATE`]
+     - [`SPECIES`] - Example: `Rattus_norwegicus`
+     - [`SPECIES_SHORT`] - Example: `Rat`
+     - [`WIKIPATHWAYS_DATE`] - Date shown in the name of the downloaded Wikipathways file (see step 2).
+     
+       Example: `20260210`
   
-8. **Run all cells of `supporting scripts/gene_synonym.ipynb`** to (re)create the nessecary intermediate files
+7. **Run all cells** in `supporting scripts/gene_synonym.ipynb`
+
+   When finsihed, the following files should appear:
+
+    -  `./data/GSEA/external_gene_data/`: `gene_descriptions.csv`, `[SPECIES_SHORT]_genes_consolidated.txt.gz`, `wikipathways_synonyms_[SPECIES].gmt.gz`
+
+    -  `./data/GSEA/to_be_converted/`: `reordered_[SPECIES_SHORT]_data.txt.gz`, `converted_wikipathways-[DATE]-gmt-[SPECIES].gmt`
+
+### Testing the embedding 
+
+The embedding model currently configured in configs_system_instruction/GSEA.json is from BioLinkBERT, a transformer model trained on biomedical literature.
+Embeddings convert biomedical text into numerical vectors, allowing the system to measure semantic similarity and retrieve biologically relevant pathways. 
+
+If the current embedding model performs poorly on your GMT file, either change the embedding model (see step 8) or fine-tune the model (see "Fine-Tuning the Model")  
+
+8. **Test the embedding** by running:
+
+   ```bash
+       python embedding_retrieval_test.py --gmt-path "<path_to_gmt_file>" --pathway "<selected_pathway_name_for_testing>"
+   ```
+
+### Configuration and running the workflow 
+
+Now that the intermediate files have been generated and the embedding model has been established, the pipeline can be further prepared for a new dataset. This mainly involves updating the query settings and providing the relevant literature used for biological interpretation.
+
+1. **Update configuration** in `configs_system_instruction/GSEA.json`:
+
+   Update the following fields:
+     - [`query`](configs_system_instruction/GSEA.json#L2)
+     - [`embeddings_model_name`](configs_system_instruction/GSEA.json#L5) 
+
+   - [`max_genes`](configs_system_instruction/GSEA.json#L11) *(max amount of genes to use from genes of interest `.txt` file)*
+
+3. **Update literature folder** in `data/PDF/`
+     - Add or replace relevant academic literature (PDF files).
+     - Ensure the literature provides biological background information relevant to the dataset.
+  
 9. **Run the rest of the pipeline**:
 
   ```bash
