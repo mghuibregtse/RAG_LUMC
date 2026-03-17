@@ -193,7 +193,7 @@ First certain intermediate files have to be created based on the species worked 
    - Example:  
       `mice_data.txt.gz`
 
-4. **Generate JSON gene resources** in `data/GSEA/JSON/`
+3. **Generate JSON gene resources** in `data/GSEA/JSON/`
 
    These JSON files store gene annotation and identifier mapping information derived from the Biomart export and are used by the pipeline to standardize and retrieve gene-related data. Regenerate the following files:
 
@@ -211,7 +211,7 @@ First certain intermediate files have to be created based on the species worked 
         ```
    
        
-6. **Update gene synonym processing** in `supporting scripts/gene_synonym.ipynb`
+4. **Update gene synonym processing** in `supporting scripts/gene_synonym.ipynb`
 
    Update the following fields:
      - [`SPECIES`] - Example: `Rattus_norwegicus`
@@ -220,7 +220,7 @@ First certain intermediate files have to be created based on the species worked 
      
        Example: `20260210`
   
-7. **Run all cells** in `supporting scripts/gene_synonym.ipynb`
+5. **Run all cells** in `supporting scripts/gene_synonym.ipynb`
 
    When finsihed, the following files should appear:
 
@@ -233,9 +233,9 @@ First certain intermediate files have to be created based on the species worked 
 The embedding model currently configured in configs_system_instruction/GSEA.json is from BioLinkBERT, a transformer model trained on biomedical literature.
 Embeddings convert biomedical text into numerical vectors, allowing the system to measure semantic similarity and retrieve biologically relevant pathways. 
 
-If the current embedding model performs poorly on your GMT file, either change the embedding model (see step 8) or fine-tune the model (see "Fine-Tuning the Model")  
+If the current embedding model performs poorly on your GMT file, either change the embedding model (see step 7) or fine-tune the model (see "Fine-Tuning the Model")  
 
-8. **Test the embedding** by running:
+6. **Test the embedding** by running:
 
    ```bash
        python embedding_retrieval_test.py --gmt-path "<path_to_gmt_file>" --pathway "<selected_pathway_name_for_testing>"
@@ -245,7 +245,7 @@ If the current embedding model performs poorly on your GMT file, either change t
 
 Now that the intermediate files have been generated and the embedding model has been established, the pipeline can be further prepared for a new dataset. This mainly involves updating the query settings and providing the relevant literature used for biological interpretation.
 
-1. **Update configuration** in `configs_system_instruction/GSEA.json`:
+7. **Update configuration** in `configs_system_instruction/GSEA.json`:
 
    Update the following fields:
      - [`query`](configs_system_instruction/GSEA.json#L2)
@@ -253,7 +253,7 @@ Now that the intermediate files have been generated and the embedding model has 
 
    - [`max_genes`](configs_system_instruction/GSEA.json#L11) *(max amount of genes to use from genes of interest `.txt` file)*
 
-3. **Update literature folder** in `data/PDF/`
+8. **Update literature folder** in `data/PDF/`
      - Add or replace relevant academic literature (PDF files).
      - Ensure the literature provides biological background information relevant to the dataset.
   
