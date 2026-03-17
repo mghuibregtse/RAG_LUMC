@@ -76,7 +76,6 @@ Key parameters (as used in GSEA.json):
 | `amount_docs`                 | Top-K docs to retrieve                             |
 | `weight_faiss`, `weight_bm25` | Scoring weights for ranking                        |
 | `max_genes`                   | Maximum genes for enrichment (e.g. \[250])         |
-| `fdr_threshold`               | FDR cutoff for pathway significance                |
 | `query_range`                 | Neighborhood depth for related terms               |
 | `system_instruction_response` | LLM instruction template                           |
 
@@ -110,7 +109,9 @@ HUGGINGFACE_API_TOKEN=your_token
 ### Input Directories
 
 * `./configs_system_instruction/` - JSON configs
-* `./data/GSEA/external_gene_data/` - `.gmt.gz`, `.txt.gz`
+* `./data/GSEA/external_gene_data/` - `.gmt`, `.gmt.gz`, `.txt.gz`
+* `./data/GSEA/genes_of_interest/` - `.txt`
+* `./data/GSEA/to_be_converted/` - `.gmt`, `.txt.gz`
 * `./data/PDF/` - PDF docs
 
 ### Output Directories
@@ -119,6 +120,7 @@ HUGGINGFACE_API_TOKEN=your_token
 * `./database/faiss_index.bin` - FAISS index
 * `./logs/` - pipeline logs and timing info
 * `./output/text_file/` - `tanswer.txt`, `documents.txt`, `scores.xlsx`
+* `./output/results/validation_and_reporting/` - Markdown validation report
 
 ---
 
