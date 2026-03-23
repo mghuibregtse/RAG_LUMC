@@ -1,4 +1,6 @@
+import argparse
 import json
+import re
 from pathlib import Path
 from typing import Dict, List, Sequence, Tuple
 
@@ -7,6 +9,8 @@ from transformers import AutoModel, AutoTokenizer
 
 MODEL_NAME = "mghuibregtse/biolinkbert-large-simcse-rat"
 DEFAULT_CONFIG_PATH = "./configs_system_instruction/GSEA.json"
+DEFAULT_GMT_PATH = "./copy_rat_external_gene_data/wikipathways_synonyms_Rattus_norvegicus.gmt"
+DEFAULT_TARGET_PATHWAY = "Irinotecan pathway"
 
 """
 Mapping to pipeline implementation in RAG_workflow.py:
@@ -20,42 +24,51 @@ Mapping to pipeline implementation in RAG_workflow.py:
     L2-normalize vectors, then compute dot-product similarity.
 """
 
+def parse_gmt_pathways(gmt_path: str) -> Dict[str, List[str]]:
+    """Parse a GMT file and return pathway -> representative gene symbols.
 
-# def build_synthetic_pathways() -> Dict[str, List[str]]:
-#     """Return a small handpicked set of real rat pathways from WikiPathways GMT."""
-#     return {
-#         "Irinotecan pathway": ["Abcc1", "Abcg2", "Abcc2"],
-#         "Glucuronidation": ["Abcc2", "Abcg2", "Ugp2"],
-#         "Non homologous end joining": ["Prkdc", "Xrcc6", "Xrcc4"],
-#         "EBV LMP1 signaling": ["Nfkb2", "Mapk8", "Abcc1"],
-#         "Estrogen signaling": ["Esr1", "Ep300", "Ccnd1"],
-#         "Transcriptional activation by Nfe2l2 in response to phytochemicals": ["Nfe2l2", "Hmox1", "Abcg2"],
-#         "Methylation": ["Mat1a", "Mat2a", "Abcc1"],
-#     }
+    For synonym-style GMT entries like `[GeneA, alias1, alias2]`, the first token
+    is used as representative (e.g., `GeneA`).
+    """
+    path = Path(gmt_path)
+    if not path.exists():
+        raise FileNotFoundError(f"GMT file not found: {gmt_path}")
 
-def build_synthetic_pathways() -> Dict[str, List[str]]:
-    """Return a set of human pathways with some overlap."""
-    return {
-        "Irinotecan pharmacokinetics/transport": ["ABCC1", "ABCG2", "ABCC2"],
-        "Glucuronidation (UGT-related)": ["ABCC2", "ABCG2", "UGP2"],
-        "Non-homologous end joining (NHEJ)": ["PRKDC", "XRCC6", "XRCC4"],
-        "NF-kB signaling (LMP1-like / inflammatory)": ["NFKB2", "MAPK8", "ABCC1"],
-        "Estrogen receptor signaling": ["ESR1", "EP300", "CCND1"],
-        "NRF2 (NFE2L2) oxidative stress response": ["NFE2L2", "HMOX1", "ABCG2"],
-        "One-carbon metabolism / methylation": ["MAT1A", "MAT2A", "ABCC1"],
-    }
+    pathways: Dict[str, List[str]] = {}
+    bracket_pattern = re.compile(r"\[(.*?)\]")
 
-# def build_synthetic_pathways() -> Dict[str, List[str]]:
-#     """Return mouse pathways using genes present in the mouse synonyms GMT."""
-#     return {
-#         "Glucuronidation": ["Ugp2", "Ugt1a1", "Ugt2a2"],
-#         "Non homologous end joining": ["Prkdc", "Xrcc6", "Xrcc4"],
-#         "EBV LMP1 signaling": ["Nfkb2", "Mapk8", "Chuk"],
-#         "Estrogen signaling": ["Esr1", "Ep300", "Ccnd1"],
-#         "Transcriptional activation by Nfe2l2 in response to phytochemicals": ["Nfe2l2", "Hmox1", "Nqo1"],
-#         "Methylation": ["Mat1a", "Mat2a", "Comt"],
-#         "One carbon metabolism and related pathways": ["Mat1a", "Mat2a", "Mthfr"],
-#     }
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        fields = line.split("\t")
+        if len(fields) < 3:
+            continue
+
+        pathway_name = fields[0].strip()
+        genes_raw = fields[2:]
+        genes: List[str] = []
+        seen = set()
+
+        for entry in genes_raw:
+            entry = entry.strip()
+            if not entry:
+                continue
+
+            match = bracket_pattern.search(entry)
+            content = match.group(1) if match else entry.strip("[]")
+            representative = content.split(",")[0].strip()
+            if representative and representative not in seen:
+                seen.add(representative)
+                genes.append(representative)
+
+        if genes:
+            pathways[pathway_name] = genes
+
+    if not pathways:
+        raise ValueError(f"No valid pathways were parsed from GMT file: {gmt_path}")
+    return pathways
 
 def format_gene_set(genes: Sequence[str]) -> str:
     """Convert a gene list to a single text string for embedding."""
@@ -119,6 +132,34 @@ def embed_query_text_identical_pipeline(
     return query_embedding
 
 
+def embed_query_texts_identical_pipeline(
+    query_texts: Sequence[str],
+    tokenizer: AutoTokenizer,
+    model: AutoModel,
+    device: torch.device,
+) -> torch.Tensor:
+    """Embed query texts using the query-side pooling in query_faiss_index."""
+    embeddings: List[torch.Tensor] = []
+    model.eval()
+    batch_size = 16
+
+    with torch.no_grad():
+        for start in range(0, len(query_texts), batch_size):
+            batch = list(query_texts[start:start + batch_size])
+            encoded = tokenizer(
+                batch,
+                return_tensors="pt",
+                truncation=True,
+                padding=True,
+                max_length=512,
+            ).to(device)
+            outputs = model(**encoded)
+            pooled = outputs.last_hidden_state.mean(dim=1)
+            embeddings.append(pooled.cpu())
+
+    return torch.cat(embeddings, dim=0).to(dtype=torch.float32)
+
+
 def cosine_similarity(query_embedding: torch.Tensor, pathway_embeddings: torch.Tensor) -> torch.Tensor:
     """Return IP scores after L2 norm, matching FAISS cosine behavior in RAG_workflow.py."""
     return pathway_embeddings @ query_embedding
@@ -146,15 +187,37 @@ def get_model_name_from_config(config_path: str = DEFAULT_CONFIG_PATH) -> str:
 
 
 def run_test() -> int:
-    """Run a minimal synthetic retrieval test with embedding steps mapped to RAG_workflow.py."""
-    pathways = build_synthetic_pathways()
-    query_genes = ["ABCC1", "ABCG2", "ABCC2"]
-    expected_top = "Irinotecan pharmacokinetics/transport"
+    """Run top-1 retrieval tests on the rat GMT pathway database."""
+    parser = argparse.ArgumentParser(description="Embedding retrieval test for pathway gene sets.")
+    parser.add_argument(
+        "--gmt-path",
+        default=DEFAULT_GMT_PATH,
+        help="Path to GMT file to index and test.",
+    )
+    parser.add_argument(
+        "--pathway",
+        default=DEFAULT_TARGET_PATHWAY,
+        help="Pathway name to use as query (default: Irinotecan pathway).",
+    )
+    parser.add_argument(
+        "--all-pathways",
+        action="store_true",
+        help="Run self-retrieval test for every pathway in the GMT file.",
+    )
+    parser.add_argument(
+        "--top-k",
+        type=int,
+        default=5,
+        help="Number of ranked pathways to print for single-pathway mode.",
+    )
+    args = parser.parse_args()
+
+    gmt_path = args.gmt_path
+    pathways = parse_gmt_pathways(gmt_path)
 
     pathway_items: List[Tuple[str, List[str]]] = list(pathways.items())
     pathway_names = [name for name, _ in pathway_items]
     pathway_texts = [format_gene_set(genes) for _, genes in pathway_items]
-    query_text = format_gene_set(query_genes)
     selected_model_name = get_model_name_from_config()
 
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
@@ -166,30 +229,80 @@ def run_test() -> int:
     model.to(device)
 
     pathway_embeddings = embed_texts(pathway_texts, tokenizer, model, device)
-    query_embedding = embed_query_text_identical_pipeline(query_text, tokenizer, model, device)
-
     pathway_embeddings = normalize_l2(pathway_embeddings)
+
+    if args.all_pathways:
+        query_embeddings = embed_query_texts_identical_pipeline(pathway_texts, tokenizer, model, device)
+        query_embeddings = normalize_l2(query_embeddings)
+
+        scores_matrix = query_embeddings @ pathway_embeddings.T
+        top_indices = torch.argmax(scores_matrix, dim=1).tolist()
+
+        correct = 0
+        failures: List[Tuple[str, str, float]] = []
+
+        for i, top_idx in enumerate(top_indices):
+            expected_pathway = pathway_names[i]
+            retrieved_pathway = pathway_names[top_idx]
+            top_score = float(scores_matrix[i, top_idx].item())
+            if expected_pathway == retrieved_pathway:
+                correct += 1
+            else:
+                failures.append((expected_pathway, retrieved_pathway, top_score))
+
+        total = len(pathway_names)
+        accuracy = correct / total
+
+        print("\n=== Full GMT Embedding Self-Retrieval Test ===")
+        print(f"GMT file: {gmt_path}")
+        print(f"Total pathways tested: {total}")
+        print(f"Top-1 self-retrieval: {correct}/{total} ({accuracy:.2%})")
+
+        if failures:
+            print("\nExamples of mismatches (up to 10):")
+            for expected, retrieved, score in failures[:10]:
+                print(f"- expected='{expected}' retrieved='{retrieved}' score={score:.4f}")
+
+        assert correct == total, (
+            "Embedding test failed: not all pathways retrieved themselves as top-1. "
+            f"Passed {correct}/{total}."
+        )
+        print("Assertion passed: every pathway retrieved itself as top-1.")
+        return 0
+
+    if args.pathway not in pathways:
+        available = ", ".join(pathway_names[:10])
+        raise ValueError(
+            f"Pathway '{args.pathway}' not found in GMT. "
+            f"Example available pathways: {available}"
+        )
+
+    query_genes = pathways[args.pathway]
+    query_text = format_gene_set(query_genes)
+    query_embedding = embed_query_text_identical_pipeline(query_text, tokenizer, model, device)
     query_embedding = query_embedding / torch.norm(query_embedding).clamp(min=1e-12)
 
     scores = cosine_similarity(query_embedding, pathway_embeddings)
     ranked_indices = torch.argsort(scores, descending=True).tolist()
+    top_k = max(1, min(args.top_k, len(ranked_indices)))
 
-    print("\n=== Synthetic Embedding Similarity Test ===")
-    print(f"Query gene set: {query_genes}")
-    print("\nRanked pathways by cosine similarity:")
+    print("\n=== Single Pathway A Retrieval Test ===")
+    print(f"GMT file: {gmt_path}")
+    print(f"Query pathway (expected top-1): {args.pathway}")
+    print(f"Query genes count: {len(query_genes)}")
+    print(f"Top-{top_k} ranked pathways:")
 
-    for rank, idx in enumerate(ranked_indices, start=1):
+    for rank, idx in enumerate(ranked_indices[:top_k], start=1):
         pathway_name = pathway_names[idx]
-        pathway_genes = pathways[pathway_name]
         score = float(scores[idx].item())
-        print(f"{rank:>2}. {pathway_name:<10} score={score:.4f} genes={pathway_genes}")
+        print(f"{rank:>2}. {pathway_name} | score={score:.4f}")
 
     top_pathway = pathway_names[ranked_indices[0]]
-    print(f"\nExpected top pathway: {expected_top}")
-    print(f"Retrieved top pathway: {top_pathway}")
+    print(f"\nRetrieved top pathway: {top_pathway}")
 
-    assert top_pathway == expected_top, (
-        f"Embedding test failed: expected top-1 '{expected_top}', got '{top_pathway}'."
+    assert top_pathway == args.pathway, (
+        "Embedding test failed: expected top-1 pathway "
+        f"'{args.pathway}', got '{top_pathway}'."
     )
     print("Assertion passed: expected pathway ranked #1.")
     return 0
