@@ -5,6 +5,7 @@ from RAG_workflow import (
     initialize_gene_list,
     load_config,
     load_gene_list_from_descriptions,
+    normalize_max_genes_config,
     resolve_gene_excel_path,
 )
 import argparse
@@ -150,25 +151,31 @@ if __name__ == "__main__":
     config_name = os.path.splitext(os.path.basename(args.config))[0]
     globals()['config_name'] = config_name
     globals().update(config)
+    max_genes = normalize_max_genes_config(config.get("max_genes"))[0]
 
     print(f"Using config: {config_name}")
-    max_genes_value = ""
-    for i in max_genes:
-        max_genes_value = i
-
-    gene_list_string, num_genes = load_gene_list_from_descriptions()
     regulation = "combined"
-    if num_genes > 0:
+    gene_list_file = config.get("gene_list_path")
+    try:
+        if not gene_list_file:
+            genes_dir = "./data/GSEA/genes_of_interest"
+            txt_files = sorted([f for f in os.listdir(genes_dir) if f.lower().endswith(".txt")]) if os.path.isdir(genes_dir) else []
+            if txt_files:
+                gene_list_file = os.path.join(genes_dir, txt_files[0])
+            else:
+                gene_list_file = resolve_gene_excel_path()
+
+        gene_list_string, regulation, num_genes = initialize_gene_list(
+            max_genes=max_genes,
+            gene_file_path=gene_list_file,
+            fdr_threshold=config.get("fdr_threshold"),
+        )
+        print(f"Using {num_genes} genes from {gene_list_file}")
+    except FileNotFoundError:
+        gene_list_string, num_genes = load_gene_list_from_descriptions(max_genes=max_genes)
         print(
             f"Using {num_genes} genes from "
             "./data/GSEA/external_gene_data/gene_descriptions.csv"
-        )
-    else:
-        excel_path = resolve_gene_excel_path()
-        gene_list_string, regulation, num_genes = initialize_gene_list(
-            max_genes=max_genes_value,
-            fdr_threshold=fdr_threshold,
-            excel_file_path=excel_path,
         )
     print(f"Number of genes: {num_genes}")
 
