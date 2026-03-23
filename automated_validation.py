@@ -3,17 +3,16 @@ import glob
 import re
 import time
 import sys
-import csv
 from pathlib import Path
 import json
 import argparse
 from tqdm import tqdm
 import markdown
-from RAG_workflow import query_llm, load_config
+from RAG_workflow import query_llm, load_config, initialize_gene_list, load_gene_list_from_descriptions, normalize_max_genes_config
 from pymed import PubMed
 import pymed
 from dotenv import load_dotenv
-from plotting import normalize_gene, load_input_gene_set, create_input_dir
+from plotting import normalize_gene
 
 load_dotenv()
 
@@ -21,14 +20,26 @@ load_dotenv()
 log_dir = './logs'
 log_file = os.path.join(log_dir, 'validation_logs.json')
 os.makedirs(log_dir, exist_ok=True)
-try:
-    with open(log_file, 'r', encoding='utf8') as f:
-        validation_logs = json.load(f)
-    if isinstance(validation_logs, list):
-        validation_logs = dict(validation_logs)
 
-except FileNotFoundError:
-    validation_logs = {}
+
+def load_validation_logs(path):
+    try:
+        # utf-8-sig transparently handles files that start with a UTF-8 BOM.
+        with open(path, 'r', encoding='utf-8-sig') as f:
+            logs = json.load(f)
+        if isinstance(logs, list):
+            logs = dict(logs)
+        if not isinstance(logs, dict):
+            return {}
+        return logs
+    except FileNotFoundError:
+        return {}
+    except json.JSONDecodeError:
+        print(f"Warning: Could not parse {path}; starting with empty validation log cache.")
+        return {}
+
+
+validation_logs = load_validation_logs(log_file)
 
 
 def read_latest_llm_output(answer_dir):
@@ -211,32 +222,35 @@ def main():
     args = parser.parse_args()
     config = load_config(args.config, print_settings=False)
     config_name = os.path.splitext(os.path.basename(args.config))[0]
-    size = config["max_genes"][0]
+    size = 0
+    gene_list_file = config.get("gene_list_path")
+    max_genes = normalize_max_genes_config(config.get("max_genes"))[0]
     globals()['config_name'] = config_name
     globals().update(config)
 
-    gene_descriptions_path = Path("data/GSEA/external_gene_data/gene_descriptions.csv")
-    input_set = set()
+    try:
+        if not gene_list_file:
+            genes_dir = Path("./data/GSEA/genes_of_interest")
+            txt_files = sorted([p for p in genes_dir.glob("*.txt")]) if genes_dir.exists() else []
+            if txt_files:
+                gene_list_file = str(txt_files[0])
+            else:
+                gene_list_file = "./data/GSEA/genes_of_interest/C3_9w_detab_fixed.txt"
 
-    if gene_descriptions_path.exists():
-        with gene_descriptions_path.open("r", encoding="utf8", newline="") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                gene_name = (row.get("Gene name") or "").strip()
-                if gene_name:
-                    input_set.add(normalize_gene(gene_name))
-
-        size = len(input_set)
-        print(f"Using {size} input genes from {gene_descriptions_path}")
-    else:
-        input_gene_dir = Path("output/all_genes")
-        configured_sizes = {int(g) for g in config.get("max_genes", [])}
-        create_input_dir(input_gene_dir, configured_sizes if configured_sizes else None)
-        input_set = load_input_gene_set(size, input_gene_dir)
-        print(
-            "gene_descriptions.csv not found; "
-            f"falling back to config-based input size ({size})"
+        gene_list_string, _, size = initialize_gene_list(
+            max_genes=max_genes,
+            gene_file_path=gene_list_file,
+            fdr_threshold=config.get("fdr_threshold"),
+            de_filter_option="combined",
         )
+    except FileNotFoundError:
+        gene_list_string, size = load_gene_list_from_descriptions(max_genes=max_genes)
+
+    input_set = {
+        normalize_gene(g)
+        for g in gene_list_string.split(",")
+        if g.strip()
+    }
 
     with open(ground_truth_file, 'r', encoding="utf8") as file:
         ground_truth = file.read().strip()

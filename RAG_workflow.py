@@ -109,7 +109,6 @@ def load_config(path: str, print_settings: Optional[bool] = False) -> Dict[str, 
         "amount_docs": 50,
         "weight_faiss": 50,
         "weight_bm25": 50,
-        "max_genes": [250],
         "fdr_threshold": 0.05,
         "query_range": 1,
     }
@@ -153,6 +152,38 @@ def load_config(path: str, print_settings: Optional[bool] = False) -> Dict[str, 
     return merged
 
 
+def normalize_max_genes_config(max_genes: Any) -> List[Optional[int]]:
+    """
+    Normalize the config value for max_genes into a list of integer run sizes.
+
+    Accepts either a single integer/string value or a list of values.
+    """
+    if max_genes in (None, "", []):
+        return [None]
+
+    raw_values = max_genes if isinstance(max_genes, list) else [max_genes]
+    normalized: List[Optional[int]] = []
+    seen: Set[Optional[int]] = set()
+
+    for value in raw_values:
+        if value in (None, ""):
+            normalized_value = None
+        else:
+            try:
+                normalized_value = int(value)
+            except (TypeError, ValueError) as exc:
+                raise ConfigError(f"Invalid max_genes value: {value!r}") from exc
+
+            if normalized_value <= 0:
+                raise ConfigError(f"max_genes must be a positive integer, got: {value!r}")
+
+        if normalized_value not in seen:
+            normalized.append(normalized_value)
+            seen.add(normalized_value)
+
+    return normalized or [None]
+
+
 # BM25 stop-words setup
 stop_words = set(stopwords.words('english'))
 stop_words |= {
@@ -183,32 +214,54 @@ def compute_file_hash(file_path: str, block_size: int = 65536) -> str:
 
 
 def initialize_gene_list(
-        max_genes: int,
-        fdr_threshold: float,
+    max_genes: Optional[int],
+        gene_file_path: str = r"./data/GSEA/genes_of_interest/C3_9w_detab_fixed.txt",
+        fdr_threshold: Optional[float] = None,
+    de_filter_option: str = "combined",
     excel_file_path: Optional[str] = None,
-        de_filter_option: str = "combined"
 ) -> Tuple[str, str, int]:
     """
-    Creates a list of genes from the specified Excel file based on filtering criteria.
+    Creates a list of genes from a plain-text file (preferred) or Excel file (legacy).
 
     Args:
-        max_genes: An integer specifying the maximum number of genes to process.
-        fdr_threshold: The threshold for the false discovery rate (FDR).
-        excel_file_path: The path to the Excel file containing gene data.
-            If not provided or missing, an available .xlsx file in
-            ./data/GSEA/genes_of_interest is used when present.
-        de_filter_option: Specifies whether to combine or separate up‐ and down‐regulated genes
-            (default: "combined").
+        max_genes: Maximum number of genes to include.
+        gene_file_path: Path to a gene list file.
+            - .txt: one gene symbol per line (no filtering is applied)
+            - .xlsx/.xls: legacy mode using DE/FDR filtering
+        fdr_threshold: Legacy FDR threshold for Excel mode.
+        de_filter_option: Legacy DE filtering mode for Excel mode.
 
     Returns:
         A tuple containing:
             - gene_list_string: A comma‐separated string of selected gene names.
-            - regulation: A string indicating the regulation type
-              ('upregulated', 'downregulated', or 'combined').
+            - regulation: "provided_list" for txt mode, or legacy regulation label for Excel mode.
             - num_genes: The number of genes included in the final list.
     """
-    resolved_excel_path = resolve_gene_excel_path(excel_file_path)
-    results = process_excel_data(resolved_excel_path, de_filter_option, max_genes, fdr_threshold)
+    if excel_file_path:
+        gene_file_path = resolve_gene_excel_path(excel_file_path)
+
+    if gene_file_path.lower().endswith('.txt'):
+        if not os.path.exists(gene_file_path):
+            raise FileNotFoundError(f"Gene list file not found: {gene_file_path}")
+
+        genes: List[str] = []
+        seen: Set[str] = set()
+        with open(gene_file_path, 'r', encoding='utf-8') as gene_file:
+            for line in gene_file:
+                gene = line.strip()
+                if not gene or gene in seen:
+                    continue
+                seen.add(gene)
+                genes.append(gene)
+                if max_genes is not None and len(genes) >= max_genes:
+                    break
+
+        return ", ".join(genes), "provided_list", len(genes)
+
+    if fdr_threshold is None:
+        fdr_threshold = 0.05
+
+    results = process_excel_data(gene_file_path, de_filter_option, max_genes, fdr_threshold)
     if results:
         gene_list_string, regulation, num_genes = results[0]
     else:
@@ -216,6 +269,56 @@ def initialize_gene_list(
         regulation = ""
         num_genes = 0
     return gene_list_string, regulation, num_genes
+
+
+def process_excel_data(
+        path: str,
+        mode: str,
+    max_genes: Optional[int],
+        fdr: float
+) -> List[Tuple[str, str, int]]:
+    """
+    Processes an Excel file to filter and extract gene data based on differential expression and FDR threshold.
+
+    Args:
+
+        path: The file path to the Excel file containing gene data.
+        mode: The differential expression filter option ('combined' or 'separate').
+        max_genes: number of genes to process.
+        fdr: False discovery rate threshold for filtering.
+
+    Returns:
+        A list of tuples. Each tuple contains:
+            - A comma-separated string of gene names.
+            - A regulation label ('upregulated', 'downregulated', or 'combined').
+            - The number of genes included in that subset.
+    """
+    df = pd.read_excel(path)
+    if max_genes is not None:
+        df = df.head(max_genes)
+    out: List[Tuple[str, str, int]] = []
+
+    def collect(sub_df: pd.DataFrame, regulation_label: str):
+        genes = sub_df['X'].tolist()
+        out.append((', '.join(genes), regulation_label, len(genes)))
+
+    if mode == "combined":
+        df = df[df.DE != 0]
+        if not df.empty and df.FDR.max() <= fdr:
+            unique = set(df.DE)
+            regulation = "upregulated" if unique == {1} else "downregulated" if unique == {-1} else "combined"
+            collect(df, regulation)
+
+    elif mode == "separate":
+        for val, label in ((1, "upregulated"), (-1, "downregulated")):
+            sub = df[df.DE == val]
+            if not sub.empty and sub.FDR.max() <= fdr:
+                collect(sub, label)
+
+    else:
+        raise ValueError(f"Unknown mode {mode!r}; expected 'combined' or 'separate'")
+
+    return out
 
 
 def resolve_gene_excel_path(
@@ -243,7 +346,7 @@ def resolve_gene_excel_path(
         if excel_files:
             fallback_path = os.path.join(genes_dir, excel_files[0])
             print(
-                f"⚠ Requested Excel file not found: {requested}. "
+                f"Requested Excel file not found: {requested}. "
                 f"Using fallback: {fallback_path}"
             )
             return fallback_path
@@ -251,62 +354,16 @@ def resolve_gene_excel_path(
     return requested
 
 
-def process_excel_data(
-        path: str,
-        mode: str,
-        max_genes: int,
-        fdr: float
-) -> List[Tuple[str, str, int]]:
-    """
-    Processes an Excel file to filter and extract gene data based on differential expression and FDR threshold.
-
-    Args:
-
-        path: The file path to the Excel file containing gene data.
-        mode: The differential expression filter option ('combined' or 'separate').
-        max_genes: number of genes to process.
-        fdr: False discovery rate threshold for filtering.
-
-    Returns:
-        A list of tuples. Each tuple contains:
-            - A comma-separated string of gene names.
-            - A regulation label ('upregulated', 'downregulated', or 'combined').
-            - The number of genes included in that subset.
-    """
-    df = pd.read_excel(path).head(max_genes)
-    out: List[Tuple[str, str, int]] = []
-
-    def collect(sub_df: pd.DataFrame, regulation_label: str):
-        genes = sub_df['X'].tolist()
-        out.append((', '.join(genes), regulation_label, len(genes)))
-
-    if mode == "combined":
-        df = df[df.DE != 0]
-        if not df.empty and df.FDR.max() <= fdr:
-            unique = set(df.DE)
-            regulation = "upregulated" if unique == {1} else "downregulated" if unique == {-1} else "combined"
-            collect(df, regulation)
-
-    elif mode == "separate":
-        for val, label in ((1, "upregulated"), (-1, "downregulated")):
-            sub = df[df.DE == val]
-            if not sub.empty and sub.FDR.max() <= fdr:
-                collect(sub, label)
-
-    else:
-        raise ValueError(f"Unknown mode {mode!r}; expected 'combined' or 'separate'")
-
-    return out
-
-
 def load_gene_list_from_descriptions(
-        csv_path: str = r"./data/GSEA/external_gene_data/gene_descriptions.csv"
+    csv_path: str = r"./data/GSEA/external_gene_data/gene_descriptions.csv",
+    max_genes: Optional[int] = None,
 ) -> Tuple[str, int]:
     """
     Load gene names from gene_descriptions.csv and return a comma-separated list plus count.
 
     Args:
         csv_path: Path to gene_descriptions.csv containing at least a 'Gene name' column.
+        max_genes: Optional maximum number of genes to return.
 
     Returns:
         Tuple of (gene_list_string, num_genes).
@@ -322,7 +379,36 @@ def load_gene_list_from_descriptions(
 
     genes = [g.strip() for g in df["Gene name"].dropna().astype(str).tolist() if g.strip()]
     genes = list(dict.fromkeys(genes))
+    if max_genes is not None:
+        genes = genes[:max_genes]
     return ", ".join(genes), len(genes)
+
+
+def resolve_gene_list_file(
+        preferred_path: Optional[str] = None,
+        genes_dir: str = r"./data/GSEA/genes_of_interest"
+) -> str:
+    """Resolve a usable gene list file path without requiring hardcoded config values."""
+    if preferred_path and os.path.exists(preferred_path):
+        return preferred_path
+
+    if preferred_path and not os.path.exists(preferred_path):
+        print(f"Configured gene list file not found: {preferred_path}. Searching fallback in {genes_dir}.")
+
+    if os.path.isdir(genes_dir):
+        txt_files = sorted([f for f in os.listdir(genes_dir) if f.lower().endswith(".txt")])
+        if txt_files:
+            return os.path.join(genes_dir, txt_files[0])
+
+        excel_files = sorted(
+            [f for f in os.listdir(genes_dir) if f.lower().endswith((".xlsx", ".xls"))]
+        )
+        if excel_files:
+            return os.path.join(genes_dir, excel_files[0])
+
+    raise FileNotFoundError(
+        f"No gene list file found. Set 'gene_list_path' in config or add a .txt/.xlsx file under {genes_dir}."
+    )
 
 
 def load_gene_id_cache(file_path: str) -> Dict[str, str]:
@@ -605,7 +691,13 @@ def save_faiss_index(
         index: The FAISS index to save.
         index_path: The file path where the FAISS index will be saved.
     """
-    faiss.write_index(index, index_path)
+    try:
+        faiss.write_index(index, index_path)
+    except RuntimeError as e:
+        # Remove a possibly truncated file so the next run can recover cleanly.
+        if os.path.exists(index_path) and os.path.getsize(index_path) == 0:
+            os.remove(index_path)
+        raise RuntimeError(f"Failed to write FAISS index to {index_path}: {e}")
 
 
 def load_faiss_index(
@@ -623,6 +715,13 @@ def load_faiss_index(
         A FAISS index with ID mapping.
     """
     if os.path.exists(index_path):
+        # Zero-byte files can be left behind after interrupted writes.
+        if os.path.getsize(index_path) == 0:
+            os.remove(index_path)
+            print(f"Deleted empty FAISS index at {index_path}; creating a new index.")
+            faiss_index = faiss.IndexFlatIP(embedding_dim)
+            return faiss.IndexIDMap(faiss_index)
+
         index = faiss.read_index(index_path)
         if not isinstance(index, faiss.IndexIDMap):
             raise ValueError(
@@ -651,7 +750,7 @@ def initialize_faiss_index(
     """
     try:
         return load_faiss_index(embedding_dim, index_path=index_path)
-    except ValueError:
+    except (ValueError, RuntimeError):
         print(
             "Deleting existing FAISS index and creating a new one with IndexIDMap.")
         if os.path.exists(index_path):
@@ -1454,6 +1553,8 @@ Only return the expanded queries, no explanation is needed.
         save = False
         answer = query_llm(messages, prompt, system_instruction, save, generation_model=generation_model,
                            query_range=1)
+        if not answer:
+            return []
         expanded_queries = answer.strip().split('\n')
         expanded_queries = [q.lstrip("-•*").lstrip("0123456789. ").strip() for q in expanded_queries if q.strip()]
         if len(expanded_queries) > number:
@@ -1626,24 +1727,17 @@ def query_llm(
                 answer = data["choices"][0]["message"]["content"]
 
             elif model_dir == "OpenAI":
-                # Some models (e.g., gpt-5-mini) don't support temperature=0
-                # Use default if the model requires it
-                temp = kwargs.get("temperature", 0)
-                if generation_model.startswith("gpt-5"):
-                    # gpt-5-mini only supports default temperature (1)
-                    kwargs_copy = {k: v for k, v in kwargs.items() if k != "temperature"}
-                    response = client_open_ai.chat.completions.create(  # type: ignore
-                        model=generation_model,
-                        messages=messages,
-                        **kwargs_copy
-                    )
-                else:
-                    response = client_open_ai.chat.completions.create(  # type: ignore
-                        model=generation_model,
-                        messages=messages,
-                        temperature=temp,
-                        **kwargs
-                    )
+                openai_params: Dict[str, Any] = {
+                    "model": generation_model,
+                    "messages": messages,
+                    **kwargs
+                }
+                if "temperature" in kwargs:
+                    openai_params["temperature"] = kwargs["temperature"]
+
+                response = client_open_ai.chat.completions.create(  # type: ignore
+                    **openai_params
+                )
                 answer = response.choices[0].message.content
 
             elif model_dir.startswith("OpenAI o"):
@@ -1683,22 +1777,18 @@ def query_llm(
                 )
                 answer = response.choices[0].message.content
             else:
-                # Fallback to OpenAI (for unknown model_dir)
-                # Some models (e.g., gpt-5-mini) don't support temperature=0
-                if generation_model.startswith("gpt-5"):
-                    kwargs_copy = {k: v for k, v in kwargs.items() if k != "temperature"}
-                    response = client_open_ai.chat.completions.create(  # type: ignore
-                        model=generation_model,
-                        messages=messages,
-                        **kwargs_copy
-                    )
-                else:
-                    response = client_open_ai.chat.completions.create(  # type: ignore
-                        model=generation_model,
-                        messages=messages,
-                        temperature=0,
-                        **kwargs
-                    )
+                # Fallback to OpenAI
+                fallback_params: Dict[str, Any] = {
+                    "model": generation_model,
+                    "messages": messages,
+                    **kwargs
+                }
+                if "temperature" in kwargs:
+                    fallback_params["temperature"] = kwargs["temperature"]
+
+                response = client_open_ai.chat.completions.create(  # type: ignore
+                    **fallback_params
+                )
                 answer = response.choices[0].message.content
 
             duration = round(time.perf_counter() - start_time, 2)
@@ -2125,7 +2215,7 @@ def main() -> None:
     dirs_to_check = [
         ('./data/GSEA/external_gene_data', ['.gz', '.gmt']),
         ('./data/PDF', ['.pdf']),
-        ('./data/GSEA/genes_of_interest', ['.xlsx'])
+        ('./data/GSEA/genes_of_interest', ['.xlsx', '.txt'])
     ]
 
     for dir_path, extensions in dirs_to_check:
@@ -2140,42 +2230,41 @@ def main() -> None:
         else:
             print(f"✗ {dir_path}: DIRECTORY NOT FOUND")
 
-    # Check for the Excel file specifically
-    excel_path = resolve_gene_excel_path()
-    if os.path.exists(excel_path):
-        print(f"✓ Excel file found: {excel_path}")
-    else:
-        print(f"✗ Excel file NOT FOUND: {excel_path}")
+    configured_gene_list_file = config_dict.get("gene_list_path")
+    gene_list_file: Optional[str] = None
+
+    try:
+        gene_list_file = resolve_gene_list_file(configured_gene_list_file)
+        print(f"✓ Using genes from {gene_list_file}")
+    except FileNotFoundError:
+        gene_list_file = None
+        description_gene_list, description_gene_count = load_gene_list_from_descriptions()
+        if description_gene_count > 0:
+            print("✓ Using genes from ./data/GSEA/external_gene_data/gene_descriptions.csv")
+        else:
+            raise
     print("=" * 40 + "\n")
 
-    precomputed_gene_list_string, precomputed_gene_count = load_gene_list_from_descriptions()
-    gene_counts_to_run = list(max_genes)
-    if precomputed_gene_count > 0:
-        gene_counts_to_run = [precomputed_gene_count]
-        print(
-            f"Using {precomputed_gene_count} genes from "
-            "./data/GSEA/external_gene_data/gene_descriptions.csv"
-        )
-
-    total_runs = len(gene_counts_to_run) * query_range
+    gene_count_schedule = normalize_max_genes_config(config_dict.get("max_genes"))
+    total_runs = len(gene_count_schedule) * query_range
     pbar = tqdm(total=total_runs, desc="Starting GSEA runs")
 
-    for gene_count in gene_counts_to_run:
+    for gene_count in gene_count_schedule:
         for iteration in range(1, query_range + 1):
             # update description
-            pbar.set_description(f"GSEA for {gene_count} genes, iteration {iteration}/{query_range}")
+            gene_label = gene_count if gene_count is not None else "all"
+            pbar.set_description(f"GSEA for {gene_label} genes, iteration {iteration}/{query_range}")
 
-            current_max_genes = gene_count
-            if precomputed_gene_count > 0:
-                gene_list_string = precomputed_gene_list_string
-                regulation = "combined"
-                num_genes = precomputed_gene_count
-            else:
+            if gene_list_file:
                 gene_list_string, regulation, num_genes = initialize_gene_list(
-                    max_genes=current_max_genes,
+                    max_genes=gene_count,
+                    gene_file_path=gene_list_file or "",
                     fdr_threshold=fdr_threshold,
                     de_filter_option="combined",
                 )
+            else:
+                gene_list_string, num_genes = load_gene_list_from_descriptions(max_genes=gene_count)
+                regulation = "provided_list"
 
             print(f"DEBUG: Gene list created with {num_genes} genes")
             if num_genes > 0:
@@ -2259,7 +2348,7 @@ def main() -> None:
             )
 
             pbar.update()
-            print(f"Completed iteration {iteration} for {num_genes} genes\n")
+            print(f"Completed iteration {iteration} for {gene_count} genes\n")
 
     pbar.close()
     print("\n=== All runs completed ===")
