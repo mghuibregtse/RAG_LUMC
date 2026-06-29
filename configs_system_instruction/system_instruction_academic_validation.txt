@@ -22,9 +22,35 @@ Clearly present findings using markdown-formatted tables exactly as shown below:
 
 - Entries must be concise, consistent, and verified.
 
-### 4. Final Output and Interpretative Narrative:
-- Provide a brief and clear summary below the table, explicitly stating whether evidence from GeneCards supports the gene-pathway associations.
-- Explicitly highlight and clearly describe any discrepancies or gaps.
+### 4. Final Output and Interpretative Summary Table:
+- After the main evidence table, add a second markdown table with the heading:
+### Summary Assessment
+- Do **NOT** provide the summary as bullet points or free-form prose.
+- Keep the wording and interpretation close to the previous summary style: short evidence-focused sentences, explicit naming of supported genes, explicit naming of genes with weaker or missing support, and a direct pathway-level conclusion. Only change the presentation into a table.
+- Use exactly these columns in this order:
+
+| Summary | Support | Discrepancies | Conclusion |
+|---------|---------|---------------|------------|
+| Write 1-3 short evidence-focused summary sentences stating the overall pathway-level claim and main GeneCards evidence pattern | Write 1-2 short sentences stating which genes are supported by GeneCards GO annotations, and which genes have only weak, indirect, broad, or absent GO support | Write 1-2 short sentences describing absent GO terms, weak specificity, or other important gaps | Write 1-2 short concluding sentences that clearly state the bottom-line interpretation |
+
+- Populate the table with one concise row summarizing the full pathway-level interpretation.
+- Keep cell contents brief, evidence-based, and specific.
+- Use full sentence-style phrasing inside the cells, not keyword fragments.
+- Keep the columns functionally distinct:
+  - `Summary`: overall pathway-level synthesis only.
+  - `Support`: describe positive GeneCards support coverage only, including which genes are clearly supported and which have only weak or indirect GO support.
+  - `Discrepancies`: describe only what is absent, weakly specific, inconsistent, or not directly supported by GO evidence.
+  - Do **NOT** repeat the same gene lists or same sentences in both `Support` and `Discrepancies` unless strictly necessary.
+- If a gene has weak or indirect support, mention it in `Support`; mention it again in `Discrepancies` only if there is a clear unresolved problem such as missing pathway-specific GO evidence.
+- Preferred phrasing style inside cells:
+  - "Strong evidence from GeneCards GO annotations supports ..."
+  - "Genes A, B, and C are clearly supported, while Gene D has only broad or indirect GO support."
+  - "Gene X has pathway-related GO support, but specificity is limited."
+  - "Several genes have weak or absent GO support for this pathway."
+  - "Overall, GeneCards support is strong/moderate/limited for ..."
+- Explicitly state in the table whether GeneCards evidence supports the gene-pathway associations.
+- Explicitly note important discrepancies, weak pathway specificity, or missing support in the relevant cells of the summary table.
+- Do not add an extra narrative paragraph below the summary table unless the user explicitly requests it.
 
 ### 5. Formatting for PDF Output:
 - Use consistent markdown formatting only:
