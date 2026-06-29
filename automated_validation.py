@@ -8,7 +8,7 @@ import json
 import argparse
 from tqdm import tqdm
 import markdown
-from RAG_workflow import query_llm, load_config, initialize_gene_list, load_gene_list_from_descriptions, normalize_max_genes_config
+from RAG_workflow import query_llm, load_config, initialize_gene_list, load_gene_list_from_descriptions
 from pymed import PubMed
 import pymed
 from dotenv import load_dotenv
@@ -42,6 +42,15 @@ def load_validation_logs(path):
 validation_logs = load_validation_logs(log_file)
 
 
+def clear_previous_validation_reports(output_directory):
+    output_path = Path(output_directory)
+    if not output_path.exists():
+        return
+
+    for report_path in output_path.glob("validation_*.md"):
+        report_path.unlink(missing_ok=True)
+
+
 def read_latest_llm_output(answer_dir):
     answer_path = os.path.join(answer_dir, "answer.txt")
     if not os.path.isfile(answer_path):
@@ -55,14 +64,29 @@ def extract_pathways(answer_text):
     pathways = []
     pathway_dict = {}
     lines = [line.strip() for line in answer_text.splitlines() if line.strip()]
-    it = iter(lines)
-    for line in it:
-        if line.endswith(":"):
-            pathway = line[:-1].strip()
-            pathways.append(pathway)
-            genes_line = next(it, "")
-            genes = [gene.strip() for gene in genes_line.split(",") if gene.strip()]
-            pathway_dict[pathway] = genes
+
+    header_re = re.compile(r"^(?!Genes involved:)(?:\d+[.)]\s*)?(?P<pathway>.+?)(?::)?$", re.IGNORECASE)
+    genes_prefix_re = re.compile(r"^Genes involved:\s*(?P<genes>.+)$", re.IGNORECASE)
+
+    current_pathway = None
+    for line in lines:
+        header_match = header_re.match(line)
+        if header_match and (line.endswith(":") or "," not in line):
+            current_pathway = header_match.group("pathway").strip()
+            pathways.append(current_pathway)
+            pathway_dict[current_pathway] = []
+            continue
+
+        genes_match = genes_prefix_re.match(line)
+        if genes_match and current_pathway:
+            genes = [gene.strip() for gene in genes_match.group("genes").split(",") if gene.strip()]
+            pathway_dict[current_pathway] = genes
+            continue
+
+        if current_pathway and "," in line and not pathway_dict[current_pathway]:
+            genes = [gene.strip() for gene in line.split(",") if gene.strip()]
+            pathway_dict[current_pathway] = genes
+
     return pathways, pathway_dict
 
 
@@ -211,6 +235,7 @@ def main():
     academic_instruction_file = "./configs_system_instruction/system_instruction_academic_validation_test.txt"
     output_directory = "./output/results/validation_and_reporting"
     os.makedirs(output_directory, exist_ok=True)
+    clear_previous_validation_reports(output_directory)
 
     parser = argparse.ArgumentParser(description="Run the RAG workflow tests for varying gene counts.")
     parser.add_argument(
@@ -224,7 +249,6 @@ def main():
     config_name = os.path.splitext(os.path.basename(args.config))[0]
     size = 0
     gene_list_file = config.get("gene_list_path")
-    max_genes = normalize_max_genes_config(config.get("max_genes"))[0]
     globals()['config_name'] = config_name
     globals().update(config)
 
@@ -238,13 +262,12 @@ def main():
                 gene_list_file = "./data/GSEA/genes_of_interest/C3_9w_detab_fixed.txt"
 
         gene_list_string, _, size = initialize_gene_list(
-            max_genes=max_genes,
             gene_file_path=gene_list_file,
             fdr_threshold=config.get("fdr_threshold"),
             de_filter_option="combined",
         )
     except FileNotFoundError:
-        gene_list_string, size = load_gene_list_from_descriptions(max_genes=max_genes)
+        gene_list_string, size = load_gene_list_from_descriptions()
 
     input_set = {
         normalize_gene(g)
@@ -268,8 +291,8 @@ def main():
         llm_output, latest_file = read_latest_llm_output(answer_dir)
     except FileNotFoundError as e:
         print(e)
-        return
-    _, pathway_dict = extract_pathways(llm_output)
+        raise SystemExit(1)
+    pathways, pathway_dict = extract_pathways(llm_output)
     output_genes = {
         normalize_gene(g)
         for genes in pathway_dict.values()
@@ -289,7 +312,6 @@ def main():
         print("Validating pathways... using g:Profiler")
         comparison_summary = validate_pathways(llm_output, ground_truth,
                                                comparison_instruction, generation_model=generation_model)
-        pathways, pathway_dict = extract_pathways(llm_output)
 
         academic_results = academic_validation(
             pathways, pathway_dict,
