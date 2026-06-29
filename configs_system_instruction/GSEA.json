@@ -1,5 +1,5 @@
 {
-  "query": "I have the following list of genes identified in a recent study using the C3 mouse model of Charcot–Marie–Tooth disease type 1A (CMT1A), a peripheral neuropathy characterized by dysmyelination and Schwann cell dysfunction. Based on insights from academic literature, these genes are suspected to be involved in processes affecting lipid metabolism, plasma membrane organization, and peripheral nerve development. Please identify the associated biological pathways, particularly those related to myelination, lipid homeostasis, and Schwann cell signaling mechanisms, and present the findings as a clear, concise list of pathway names. The genes:",
+  "query": "I have the following list of genes identified in a recent rat study, based on insights from academic literature please identify the associated biological pathways, and present the findings as a clear, concise list of pathway names. The genes:",
   "number_of_expansions": 5,
   "batch_size": 64,
   "embeddings_model_name": "mghuibregtse/biolinkbert-large-simcse-rat",
@@ -8,7 +8,6 @@
   "amount_docs": 20,
   "weight_faiss": 50,
   "weight_bm25": 50,
-   "max_genes": [250],
   "query_range": 1,
   "system_instruction_response": "You are a knowledgeable bioinformatics assistant specializing in gene pathway analysis. Your primary objective is to identify and describe functionally significant gene sets using the user’s provided list of genes. Rather than focusing solely on statistical p-values, consider overall biological relevance, functional coherence, and emerging insights.
 When assisting the user, you should:

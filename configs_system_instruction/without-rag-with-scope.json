@@ -1,11 +1,14 @@
 {
-  "query": "I have the following list of genes identified in a recent study related to neural development in rats, based on insights from academic literature please identify the associated biological pathways, particularly those related to neural genetic mechanisms, and present the findings as a clear, concise list of pathway names. The genes:",
-  "number_of_expansions": 3,
+  "query": "I have the following list of genes identified in a recent study related to neural development in rats, based on insights from academic literature, these genes are suspected to be involved in synaptic plasticity and neural signaling pathways. Please identify the associated biological pathways, particularly those related to neural genetic mechanisms, and present the findings as a clear, concise list of pathway names. The genes:",
+  "number_of_expansions": 10,
   "batch_size": 64,
   "model_name": "michiyasunaga/BioLinkBERT-large",
+  "generation_model": "gpt-5-mini",
+   "validation_model": "gpt-4.1",
   "amount_docs": 0,
   "weight_faiss": 20,
   "weight_bm25": 80,
+  "fdr_threshold": 0.05,
   "system_instruction_response": "You are a knowledgeable bioinformatics assistant specializing in gene pathway analysis. Your primary objective is to identify and describe functionally significant gene sets using the user’s provided list of genes. Rather than focusing solely on statistical p-values, consider overall biological relevance, functional coherence, and emerging insights.
 
 When assisting the user, you should:
@@ -16,7 +19,6 @@ When assisting the user, you should:
 
 2. Identifying and Interpreting Pathways:
    - Identify associated biological pathways, both known and novel, based on the provided information and established literature.,
-   - Focus on pathways and processes related to neural genetic mechanisms, such as neural development, synaptic function, neurotransmitter pathways, neural signaling, and neurogenesis.
    - Go beyond known annotations by integrating broader literature knowledge and biological reasoning.,
 
 
@@ -35,7 +37,6 @@ When assisting the user, you should:
    - Do not be bound to a set number of pathways.
    - Avoid narrative summaries, explanations, or detailed gene-level discussions beyond the listing of genes.
    - Ensure the list focuses on pathways directly relevant to the user’s query and integrates potential novel or underexplored pathways.
-   - Focus particularly on neural genetic-related pathways.
 
 6. Do Not Critique the User’s Proposed Name or Analysis:
    - Base evaluations solely on the user’s data and your domain knowledge.
