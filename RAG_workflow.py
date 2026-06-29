@@ -129,6 +129,14 @@ def load_config(path: str, print_settings: Optional[bool] = False) -> Dict[str, 
     except json.JSONDecodeError as e:
         raise ConfigError(f"Invalid JSON in {path!r}: {e}")
 
+    legacy_aliases = {
+        "model_name": "embeddings_model_name",
+        "model": "embeddings_model_name",
+    }
+    for legacy_key, current_key in legacy_aliases.items():
+        if legacy_key in user_cfg and current_key not in user_cfg:
+            user_cfg[current_key] = user_cfg[legacy_key]
+
     # Required keys
     for key in ("system_instruction_response", "query"):
         if key not in user_cfg:
@@ -150,38 +158,6 @@ def load_config(path: str, print_settings: Optional[bool] = False) -> Dict[str, 
             print(f"{k}: {v} (from {src} config)")
 
     return merged
-
-
-def normalize_max_genes_config(max_genes: Any) -> List[Optional[int]]:
-    """
-    Normalize the config value for max_genes into a list of integer run sizes.
-
-    Accepts either a single integer/string value or a list of values.
-    """
-    if max_genes in (None, "", []):
-        return [None]
-
-    raw_values = max_genes if isinstance(max_genes, list) else [max_genes]
-    normalized: List[Optional[int]] = []
-    seen: Set[Optional[int]] = set()
-
-    for value in raw_values:
-        if value in (None, ""):
-            normalized_value = None
-        else:
-            try:
-                normalized_value = int(value)
-            except (TypeError, ValueError) as exc:
-                raise ConfigError(f"Invalid max_genes value: {value!r}") from exc
-
-            if normalized_value <= 0:
-                raise ConfigError(f"max_genes must be a positive integer, got: {value!r}")
-
-        if normalized_value not in seen:
-            normalized.append(normalized_value)
-            seen.add(normalized_value)
-
-    return normalized or [None]
 
 
 # BM25 stop-words setup
@@ -214,7 +190,6 @@ def compute_file_hash(file_path: str, block_size: int = 65536) -> str:
 
 
 def initialize_gene_list(
-    max_genes: Optional[int],
         gene_file_path: str = r"./data/GSEA/genes_of_interest/C3_9w_detab_fixed.txt",
         fdr_threshold: Optional[float] = None,
     de_filter_option: str = "combined",
@@ -224,7 +199,6 @@ def initialize_gene_list(
     Creates a list of genes from a plain-text file (preferred) or Excel file (legacy).
 
     Args:
-        max_genes: Maximum number of genes to include.
         gene_file_path: Path to a gene list file.
             - .txt: one gene symbol per line (no filtering is applied)
             - .xlsx/.xls: legacy mode using DE/FDR filtering
@@ -253,15 +227,13 @@ def initialize_gene_list(
                     continue
                 seen.add(gene)
                 genes.append(gene)
-                if max_genes is not None and len(genes) >= max_genes:
-                    break
 
         return ", ".join(genes), "provided_list", len(genes)
 
     if fdr_threshold is None:
         fdr_threshold = 0.05
 
-    results = process_excel_data(gene_file_path, de_filter_option, max_genes, fdr_threshold)
+    results = process_excel_data(gene_file_path, de_filter_option, fdr_threshold)
     if results:
         gene_list_string, regulation, num_genes = results[0]
     else:
@@ -274,7 +246,6 @@ def initialize_gene_list(
 def process_excel_data(
         path: str,
         mode: str,
-    max_genes: Optional[int],
         fdr: float
 ) -> List[Tuple[str, str, int]]:
     """
@@ -284,7 +255,6 @@ def process_excel_data(
 
         path: The file path to the Excel file containing gene data.
         mode: The differential expression filter option ('combined' or 'separate').
-        max_genes: number of genes to process.
         fdr: False discovery rate threshold for filtering.
 
     Returns:
@@ -294,8 +264,6 @@ def process_excel_data(
             - The number of genes included in that subset.
     """
     df = pd.read_excel(path)
-    if max_genes is not None:
-        df = df.head(max_genes)
     out: List[Tuple[str, str, int]] = []
 
     def collect(sub_df: pd.DataFrame, regulation_label: str):
@@ -356,15 +324,12 @@ def resolve_gene_excel_path(
 
 def load_gene_list_from_descriptions(
     csv_path: str = r"./data/GSEA/external_gene_data/gene_descriptions.csv",
-    max_genes: Optional[int] = None,
 ) -> Tuple[str, int]:
     """
     Load gene names from gene_descriptions.csv and return a comma-separated list plus count.
 
     Args:
         csv_path: Path to gene_descriptions.csv containing at least a 'Gene name' column.
-        max_genes: Optional maximum number of genes to return.
-
     Returns:
         Tuple of (gene_list_string, num_genes).
     """
@@ -379,8 +344,6 @@ def load_gene_list_from_descriptions(
 
     genes = [g.strip() for g in df["Gene name"].dropna().astype(str).tolist() if g.strip()]
     genes = list(dict.fromkeys(genes))
-    if max_genes is not None:
-        genes = genes[:max_genes]
     return ", ".join(genes), len(genes)
 
 
@@ -547,6 +510,8 @@ def convert_gene_id_to_symbols(
                         if line_index not in sanitized_gene_id_map:
                             sanitized_gene_id_map[line_index] = []
                         sanitized_gene_id_map[line_index].append((i, sanitized_gene_id))
+                    else:
+                        gene_symbols.append(sanitized_gene_id)
 
             new_line = '\t'.join(pathway_info + gene_symbols)
             output_lines.append(new_line)
@@ -1653,6 +1618,18 @@ def get_generation_model_dir(model: str) -> str:
     return "OpenAI"
 
 
+def should_set_default_temperature(model: str) -> bool:
+    """
+    Determine whether an OpenAI-compatible model should receive an explicit default temperature.
+
+    GPT-5 family chat models reject explicit non-default temperature values in this code path,
+    so they must be called without a temperature parameter unless one is intentionally supplied
+    elsewhere with a supported value.
+    """
+    normalized_model = model.lower()
+    return not normalized_model.startswith("gpt-5")
+
+
 def query_llm(
     messages: List[Dict[str, Any]],
     system_instruction_for_response: str,
@@ -1732,8 +1709,11 @@ def query_llm(
                     "messages": messages,
                     **kwargs
                 }
-                if "temperature" in kwargs:
-                    openai_params["temperature"] = kwargs["temperature"]
+                if (
+                    "temperature" not in openai_params
+                    and should_set_default_temperature(generation_model)
+                ):
+                    openai_params["temperature"] = 0
 
                 response = client_open_ai.chat.completions.create(  # type: ignore
                     **openai_params
@@ -1783,8 +1763,11 @@ def query_llm(
                     "messages": messages,
                     **kwargs
                 }
-                if "temperature" in kwargs:
-                    fallback_params["temperature"] = kwargs["temperature"]
+                if (
+                    "temperature" not in fallback_params
+                    and should_set_default_temperature(generation_model)
+                ):
+                    fallback_params["temperature"] = 0
 
                 response = client_open_ai.chat.completions.create(  # type: ignore
                     **fallback_params
@@ -2245,110 +2228,105 @@ def main() -> None:
             raise
     print("=" * 40 + "\n")
 
-    gene_count_schedule = normalize_max_genes_config(config_dict.get("max_genes"))
-    total_runs = len(gene_count_schedule) * query_range
+    total_runs = query_range
     pbar = tqdm(total=total_runs, desc="Starting GSEA runs")
 
-    for gene_count in gene_count_schedule:
-        for iteration in range(1, query_range + 1):
-            # update description
-            gene_label = gene_count if gene_count is not None else "all"
-            pbar.set_description(f"GSEA for {gene_label} genes, iteration {iteration}/{query_range}")
+    for iteration in range(1, query_range + 1):
+        pbar.set_description(f"GSEA iteration {iteration}/{query_range}")
 
-            if gene_list_file:
-                gene_list_string, regulation, num_genes = initialize_gene_list(
-                    max_genes=gene_count,
-                    gene_file_path=gene_list_file or "",
-                    fdr_threshold=fdr_threshold,
-                    de_filter_option="combined",
-                )
-            else:
-                gene_list_string, num_genes = load_gene_list_from_descriptions(max_genes=gene_count)
-                regulation = "provided_list"
-
-            print(f"DEBUG: Gene list created with {num_genes} genes")
-            if num_genes > 0:
-                print(f"  First few genes: {', '.join(gene_list_string.split(', ')[:5])}...")
-
-            data_dir = './data/GSEA/external_gene_data'
-            log_dir = './logs'
-            log_path = os.path.join(log_dir, 'file_log.json')
-            index_path = './database/faiss_index.bin'
-            db_path = './database/reference_chunks.db'
-            ncbi_json_dir = './data/JSON/'
-
-            print("\nProcessing files in directory...")
-            process_files_in_directory(data_dir, ncbi_json_dir)
-
-            print("\nInitializing database and embeddings...")
-            conn = initialize_database(db_path=db_path)
-            tokenizer, embeddings_model = load_embeddings_model_and_tokenizer()
-            embedding_dim = embeddings_model.config.hidden_size
-
-            index = initialize_faiss_index(embedding_dim, index_path)
-
-            print("\nEmbedding documents...")
-            embed_documents_and_save(
-                index, conn, tokenizer, embeddings_model,
-                data_dir, batch_size=batch_size,
-                log_path=log_path, index_path=index_path
+        if gene_list_file:
+            gene_list_string, regulation, num_genes = initialize_gene_list(
+                gene_file_path=gene_list_file or "",
+                fdr_threshold=fdr_threshold,
+                de_filter_option="combined",
             )
+        else:
+            gene_list_string, num_genes = load_gene_list_from_descriptions()
+            regulation = "provided_list"
 
-            # Debug: Check database content after embedding
-            print("\n=== Database Status Check ===")
-            conn_check = sqlite3.connect(db_path)
-            cursor = conn_check.cursor()
-            cursor.execute("SELECT COUNT(*) FROM chunks")
-            chunk_count = cursor.fetchone()[0]
-            print(f"Database has {chunk_count} chunks after embedding")
+        print(f"DEBUG: Gene list created with {num_genes} genes")
+        if num_genes > 0:
+            print(f"  First few genes: {', '.join(gene_list_string.split(', ')[:5])}...")
 
-            if chunk_count == 0:
-                print("WARNING: No chunks in database! Checking for issues...")
-                print("  - Check if file_log.json exists and delete it to force reprocessing")
-                print("  - Ensure data files exist in the expected directories")
-                print("  - Check file formats are correct (.gz, .gmt, .pdf)")
-                conn_check.close()
-                pbar.update()
-                continue  # Skip this iteration since we have no data
+        data_dir = './data/GSEA/external_gene_data'
+        log_dir = './logs'
+        log_path = os.path.join(log_dir, 'file_log.json')
+        index_path = './database/faiss_index.bin'
+        db_path = './database/reference_chunks.db'
+        ncbi_json_dir = './data/JSON/'
 
-            # Get sample of chunks to verify content
-            cursor.execute("SELECT file_name, COUNT(*) FROM chunks GROUP BY file_name LIMIT 5")
-            file_counts = cursor.fetchall()
-            print("Sample of files with chunks:")
-            for file_name, count in file_counts:
-                print(f"  - {file_name}: {count} chunks")
+        print("\nProcessing files in directory...")
+        process_files_in_directory(data_dir, ncbi_json_dir)
+
+        print("\nInitializing database and embeddings...")
+        conn = initialize_database(db_path=db_path)
+        tokenizer, embeddings_model = load_embeddings_model_and_tokenizer()
+        embedding_dim = embeddings_model.config.hidden_size
+
+        index = initialize_faiss_index(embedding_dim, index_path)
+
+        print("\nEmbedding documents...")
+        embed_documents_and_save(
+            index, conn, tokenizer, embeddings_model,
+            data_dir, batch_size=batch_size,
+            log_path=log_path, index_path=index_path
+        )
+
+        # Debug: Check database content after embedding
+        print("\n=== Database Status Check ===")
+        conn_check = sqlite3.connect(db_path)
+        cursor = conn_check.cursor()
+        cursor.execute("SELECT COUNT(*) FROM chunks")
+        chunk_count = cursor.fetchone()[0]
+        print(f"Database has {chunk_count} chunks after embedding")
+
+        if chunk_count == 0:
+            print("WARNING: No chunks in database! Checking for issues...")
+            print("  - Check if file_log.json exists and delete it to force reprocessing")
+            print("  - Ensure data files exist in the expected directories")
+            print("  - Check file formats are correct (.gz, .gmt, .pdf)")
             conn_check.close()
-            print("=" * 40 + "\n")
-
-            # Continue with the workflow
-            print("Loading FAISS index and building BM25...")
-            index = load_faiss_index(embedding_dim, index_path=index_path)
-            conn = sqlite3.connect(db_path)
-
-            # Build BM25 with error handling
-            try:
-                bm25_index, bm25_chunk_ids, bm25_chunk_texts = build_bm25_index(conn)
-                print(f"BM25 index built with {len(bm25_chunk_ids)} documents")
-            except ZeroDivisionError as e:
-                print(f"ERROR building BM25 index: {e}")
-                print("This usually means no chunks were found in the database")
-                conn.close()
-                pbar.update()
-                continue
-
-            print("\nGenerating response...")
-            generate_response_and_save(
-                query,
-                gene_list_string,
-                conn, index, tokenizer, embeddings_model,
-                bm25_index, bm25_chunk_ids,
-                weight_faiss, weight_bm25,
-                system_instruction_response,
-                num_genes
-            )
-
             pbar.update()
-            print(f"Completed iteration {iteration} for {gene_count} genes\n")
+            continue  # Skip this iteration since we have no data
+
+        # Get sample of chunks to verify content
+        cursor.execute("SELECT file_name, COUNT(*) FROM chunks GROUP BY file_name LIMIT 5")
+        file_counts = cursor.fetchall()
+        print("Sample of files with chunks:")
+        for file_name, count in file_counts:
+            print(f"  - {file_name}: {count} chunks")
+        conn_check.close()
+        print("=" * 40 + "\n")
+
+        # Continue with the workflow
+        print("Loading FAISS index and building BM25...")
+        index = load_faiss_index(embedding_dim, index_path=index_path)
+        conn = sqlite3.connect(db_path)
+
+        # Build BM25 with error handling
+        try:
+            bm25_index, bm25_chunk_ids, bm25_chunk_texts = build_bm25_index(conn)
+            print(f"BM25 index built with {len(bm25_chunk_ids)} documents")
+        except ZeroDivisionError as e:
+            print(f"ERROR building BM25 index: {e}")
+            print("This usually means no chunks were found in the database")
+            conn.close()
+            pbar.update()
+            continue
+
+        print("\nGenerating response...")
+        generate_response_and_save(
+            query,
+            gene_list_string,
+            conn, index, tokenizer, embeddings_model,
+            bm25_index, bm25_chunk_ids,
+            weight_faiss, weight_bm25,
+            system_instruction_response,
+            num_genes
+        )
+
+        pbar.update()
+        print(f"Completed iteration {iteration}\n")
 
     pbar.close()
     print("\n=== All runs completed ===")
