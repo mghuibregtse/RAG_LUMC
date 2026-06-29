@@ -5,7 +5,6 @@ from RAG_workflow import (
     initialize_gene_list,
     load_config,
     load_gene_list_from_descriptions,
-    normalize_max_genes_config,
     resolve_gene_excel_path,
 )
 import argparse
@@ -151,7 +150,6 @@ if __name__ == "__main__":
     config_name = os.path.splitext(os.path.basename(args.config))[0]
     globals()['config_name'] = config_name
     globals().update(config)
-    max_genes = normalize_max_genes_config(config.get("max_genes"))[0]
 
     print(f"Using config: {config_name}")
     regulation = "combined"
@@ -166,13 +164,12 @@ if __name__ == "__main__":
                 gene_list_file = resolve_gene_excel_path()
 
         gene_list_string, regulation, num_genes = initialize_gene_list(
-            max_genes=max_genes,
             gene_file_path=gene_list_file,
             fdr_threshold=config.get("fdr_threshold"),
         )
         print(f"Using {num_genes} genes from {gene_list_file}")
     except FileNotFoundError:
-        gene_list_string, num_genes = load_gene_list_from_descriptions(max_genes=max_genes)
+        gene_list_string, num_genes = load_gene_list_from_descriptions()
         print(
             f"Using {num_genes} genes from "
             "./data/GSEA/external_gene_data/gene_descriptions.csv"
